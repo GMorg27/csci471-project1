@@ -14,7 +14,7 @@
 #include <filesystem>
 #include <string>
 
-#ifndef  __FILE_NAME__
+#ifndef __FILE_NAME__
 #define __FILE_NAME__ std::filesystem::path(__FILE__).filename().string()
 #endif
 
@@ -27,5 +27,4 @@ inline int LOG_LEVEL = 3;
 #define FATAL   if (LOG_LEVEL > 0) { std::cerr << "FATAL: "
 #define ENDL  " (" << __FILE_NAME__ << ":" << __LINE__ << ")" << std::endl; }
 
-
-#endif //LOGGING_H
+#endif // LOGGING_H
