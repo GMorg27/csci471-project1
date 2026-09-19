@@ -1,6 +1,7 @@
 #ifndef HEADER_H
 #define HEADER_H
 
+#include <cstring>
 #include <iostream>
 #include <fstream>
 #include <regex>
@@ -21,5 +22,6 @@
 #define POST 3
 
 inline int BUFFER_SIZE = 10;
+inline int DEFAULT_PORT = 1701;
 
 #endif
