@@ -24,4 +24,8 @@
 inline int BUFFER_SIZE = 10;
 inline int DEFAULT_PORT = 1701;
 
+inline const std::regex HTTP_GET_PATTERN(R"(^GET\s+([^?\s]+)(?:\?\S*)?\s+(HTTP\/[\d.]+)\r\n$)");
+inline const std::regex HTML_FILENAME_PATTERN(R"(^\/?(file[0-9]\.html)$)");
+inline const std::regex IMAGE_FILENAME_PATTERN(R"(^\/?(image[0-9]\.jpg)$)");
+
 #endif

@@ -39,32 +39,104 @@ void sig_handler(int signo) {
 // **************************************************************************************
 // * processRequest,
 //   - Return HTTP code to be sent back
-//   - Set filename if appropriate. Filename syntax is valided but existance is not verified.
+//   - Set filename if appropriate. Filename syntax is validated but existence is not verified.
 // **************************************************************************************
-int readHeader(int sockFd, std::string &filename) {
-    return 0;
+int processRequest(int sockFd, std::string &filename) {
+    int returnCode = 400;
+
+    std::string line;
+    char buffer[BUFFER_SIZE];
+    bool lineEnd = false;
+    while (!lineEnd) {
+        int numBytes = read(sockFd, buffer, BUFFER_SIZE);
+        if (numBytes > 0) {
+            // Check for end of header line
+            for (int i = 0; i < numBytes - 1; i++) {
+                if (buffer[i] == '\r' && buffer[i + 1] == '\n') {
+                    numBytes = i + 2;
+                    lineEnd = true;
+                    break;
+                }
+            }
+            line.append(buffer, numBytes);
+        }
+        else if (numBytes == 0) {
+            ERROR << "Client disconnected unexpectedly." << ENDL;
+            break;
+        }
+        else {
+            ERROR << "Read error occurred: " << std::strerror(errno) << ENDL;
+            break;
+        }
+    }
+
+    // Match line with HTTP GET request regex pattern and extract filename
+    if (lineEnd) {
+        std::smatch matches;
+        if (std::regex_match(line, matches, HTTP_GET_PATTERN)) {
+            filename = matches[1];
+            DEBUG << "Matched filename " << filename << ENDL;
+
+            // Validate filename
+            std::smatch matches;
+            if (std::regex_match(filename, matches, HTML_FILENAME_PATTERN) || std::regex_match(filename, matches, IMAGE_FILENAME_PATTERN)) {
+                filename = matches[1];
+                returnCode = 200;
+            }
+            else {
+                returnCode = 404;
+                DEBUG << "Invalid filename " << filename << ENDL;
+            }
+        }
+    }
+
+    return returnCode;
 }
 
 // **************************************************************************
-// * Send one line (including the line terminator <LF><CR>)
+// * Send one line (including the line terminator <CR><LF>)
 // * - Assumes the terminator is not included, so it is appended.
 // **************************************************************************
-void sendLine(int socketFd, std::string &stringToSend) {
-    return;
+void sendLine(int sockFd, std::string &stringToSend) {
+    int lineSize = stringToSend.size() + 2;
+    char* stringData = new char[lineSize];
+    for (int i = 0; i < stringToSend.size(); i++) {
+        stringData[i] = stringToSend[i];
+    }
+    stringData[lineSize - 2] = '\r';
+    stringData[lineSize - 1] = '\n';
+    
+    if (write(sockFd, stringData, lineSize) == -1) {
+        ERROR << "Write error occurred: " << std::strerror(errno) << ENDL;
+    }
+    delete stringData;
 }
 
 // **************************************************************************
 // * Send the entire 404 response, header and body.
 // **************************************************************************
 void send404(int sockFd) {
-    return;
+    std::string responseLine = "HTTP/1.0 404 Not Found";
+    std::string contentTypeHeader = "content-type: text/html";
+    std::string headerTerminator = "";
+    sendLine(sockFd, responseLine);
+    sendLine(sockFd, contentTypeHeader);
+    sendLine(sockFd, headerTerminator);
+
+    std::string message = "File not found.";
+    std::string messageTerminator = "";
+    sendLine(sockFd, message);
+    sendLine(sockFd, messageTerminator);
 }
 
 // **************************************************************************
 // * Send the entire 400 response, header and body.
 // **************************************************************************
 void send400(int sockFd) {
-    return;
+    std::string responseLine = "HTTP/1.0 400 Bad Request";
+    std::string terminator = "";
+    sendLine(sockFd, responseLine);
+    sendLine(sockFd, terminator);
 }
 
 // **************************************************************************************
@@ -72,7 +144,42 @@ void send400(int sockFd) {
 // * -- Send a file back to the browser.
 // **************************************************************************************
 void sendFile(int sockFd, std::string filename) {
-    return;
+    struct stat fileInfo;
+    std::string path = "data/" + filename;
+    if (stat(path.c_str(), &fileInfo) == -1) {
+        DEBUG << "stat() failed. Sending 404." << ENDL;
+        send404(sockFd);
+        return;
+    }
+    int fileSize = fileInfo.st_size;
+
+    std::string responseLine = "HTTP/1.0 200 OK";
+    std::string contentTypeHeader = "content-type: ";
+    bool isHtml = std::regex_match(filename, HTML_FILENAME_PATTERN);
+    contentTypeHeader += isHtml ? "text/html" : "image/jpeg";
+    std::string contentLengthHeader = "content-length: " + std::to_string(fileSize);
+    std::string headerTerminator = "";
+    sendLine(sockFd, responseLine);
+    sendLine(sockFd, contentTypeHeader);
+    sendLine(sockFd, contentLengthHeader);
+    sendLine(sockFd, headerTerminator);
+
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) {
+        ERROR << "Error opening file." << ENDL;
+        return;
+    }
+
+    DEBUG << "Writing file data." << ENDL;
+    char buffer[BUFFER_SIZE];
+    int bytesSent = 0;
+    while (bytesSent < fileSize) {
+        file.read(buffer, BUFFER_SIZE);
+        int bytesRead = file.gcount();
+        write(sockFd, buffer, bytesRead);
+        bytesSent += bytesRead;
+    }
+    file.close();
 }
 
 // **************************************************************************************
@@ -81,52 +188,23 @@ void sendFile(int sockFd, std::string filename) {
 // **************************************************************************************
 int processConnection(int sockFd) {
     std::string filename;
-    readHeader(sockFd, filename);
-    
-    char buffer[BUFFER_SIZE];
-    bool closeConn = false;
-    while (!closeConn) {
-        std::memset(buffer, 0, BUFFER_SIZE);
-        std::string line;
+    int returnCode = processRequest(sockFd, filename);
+    DEBUG << "processRequest returned " << returnCode << ENDL;
 
-        while (true) {
-            int numBytes = read(sockFd, buffer, BUFFER_SIZE);
-            if (numBytes > 0) {
-                line.append(buffer, numBytes);
-                if (line.find("\n") != std::string::npos) {
-                    break;
-                }
-            }
-            else if (numBytes == 0) {
-                DEBUG << "Client disconnected." << ENDL;
-                closeConn = true;
-                break;
-            }
-            else {
-                ERROR << "Read error occurred: " << std::strerror(errno) << ENDL;
-                closeConn = true;
-                break;
-            }
-        }
-
-        int closePos = line.find("CLOSE");
-        if (closePos != std::string::npos) {
-            line = line.substr(0, closePos);
-            closeConn = true;
-        }
-        if (line.size() > 0) {
-            if (write(sockFd, line.data(), line.size()) == -1) {
-                ERROR << "Write error occurred: " << std::strerror(errno) << ENDL;
-                closeConn = true;
-            }
-        }
+    switch (returnCode) {
+    case 200:
+        sendFile(sockFd, filename);
+        break;
+    case 400:
+        send400(sockFd);
+        break;
+    case 404:
+        send404(sockFd);
+        break;
+    default:
+        ERROR << "Unexpected status code " << returnCode << ENDL;
+        return -1;
     }
-
-    // If read header returned 400, send 400
-
-    // If read header returned 404, call send404
-
-    // 471: If read header returned 200, call sendFile
 
     return 0;
 }

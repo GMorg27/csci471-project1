@@ -37,7 +37,7 @@ clean:
 	rm -f core ${TARGET} ${OBJ_FILES}
 
 #
-# This might work to create the submission tarball in the formal I asked for.
+# This might work to create the submission tarball in the format I asked for.
 #
 submit:
 	rm -f core project1 ${OBJ_FILES}
