@@ -44,21 +44,19 @@ void sig_handler(int signo) {
 int processRequest(int sockFd, std::string &filename) {
     int returnCode = 400;
 
-    std::string line;
+    // Read entire HTTP request
+    std::string request;
     char buffer[BUFFER_SIZE];
-    bool lineEnd = false;
-    while (!lineEnd) {
+    int findPos = 0;
+    while (request.find("\r\n\r\n", findPos) == std::string::npos) {
         int numBytes = read(sockFd, buffer, BUFFER_SIZE);
         if (numBytes > 0) {
-            // Check for end of header line
-            for (int i = 0; i < numBytes - 1; i++) {
-                if (buffer[i] == '\r' && buffer[i + 1] == '\n') {
-                    numBytes = i + 2;
-                    lineEnd = true;
-                    break;
-                }
+            request.append(buffer, numBytes);
+            // Update position to start searching for terminator
+            findPos = request.size() - numBytes - 3;
+            if (findPos < 0) {
+                findPos = 0;
             }
-            line.append(buffer, numBytes);
         }
         else if (numBytes == 0) {
             ERROR << "Client disconnected unexpectedly." << ENDL;
@@ -71,16 +69,18 @@ int processRequest(int sockFd, std::string &filename) {
     }
 
     // Match line with HTTP GET request regex pattern and extract filename
+    int lineEnd = request.find("\r\n");
+    std::string reqLine = request.substr(0, lineEnd + 2);
     if (lineEnd) {
-        std::smatch matches;
-        if (std::regex_match(line, matches, HTTP_GET_PATTERN)) {
-            filename = matches[1];
+        std::smatch reqMatches;
+        if (std::regex_match(reqLine, reqMatches, HTTP_GET_PATTERN)) {
+            filename = reqMatches[1];
             DEBUG << "Matched filename " << filename << ENDL;
 
             // Validate filename
-            std::smatch matches;
-            if (std::regex_match(filename, matches, HTML_FILENAME_PATTERN) || std::regex_match(filename, matches, IMAGE_FILENAME_PATTERN)) {
-                filename = matches[1];
+            std::smatch fileMatches;
+            if (std::regex_match(filename, fileMatches, HTML_FILENAME_PATTERN) || std::regex_match(filename, fileMatches, IMAGE_FILENAME_PATTERN)) {
+                filename = fileMatches[1];
                 returnCode = 200;
             }
             else {
@@ -91,6 +91,24 @@ int processRequest(int sockFd, std::string &filename) {
     }
 
     return returnCode;
+}
+
+// **************************************************************************************
+// * sendData
+// * -- Write buffer data to a file descriptor.
+// * -- Return true iff succesful.
+// **************************************************************************************
+bool sendData(int sockFd, char *data, int length) {
+    int bytesSent = 0;
+    while (bytesSent < length) {
+        int numBytes = write(sockFd, data + bytesSent, length - bytesSent);
+        if (numBytes == -1) {
+            ERROR << "Write error occurred: " << std::strerror(errno) << ENDL;
+            return false;
+        }
+        bytesSent += numBytes;
+    }
+    return true;
 }
 
 // **************************************************************************
@@ -106,10 +124,8 @@ void sendLine(int sockFd, std::string &stringToSend) {
     stringData[lineSize - 2] = '\r';
     stringData[lineSize - 1] = '\n';
     
-    if (write(sockFd, stringData, lineSize) == -1) {
-        ERROR << "Write error occurred: " << std::strerror(errno) << ENDL;
-    }
-    delete stringData;
+    sendData(sockFd, stringData, lineSize);
+    delete[] stringData;
 }
 
 // **************************************************************************
@@ -176,7 +192,9 @@ void sendFile(int sockFd, std::string filename) {
     while (bytesSent < fileSize) {
         file.read(buffer, BUFFER_SIZE);
         int bytesRead = file.gcount();
-        write(sockFd, buffer, bytesRead);
+        if (!sendData(sockFd, buffer, bytesRead)) {
+            break;
+        }
         bytesSent += bytesRead;
     }
     file.close();
@@ -184,7 +202,7 @@ void sendFile(int sockFd, std::string filename) {
 
 // **************************************************************************************
 // * processConnection
-// * -- process one connection/request.
+// * -- Process one connection/request.
 // **************************************************************************************
 int processConnection(int sockFd) {
     std::string filename;
@@ -306,6 +324,10 @@ int main(int argc, char *argv[]) {
     while (!quitProgram) {
         DEBUG << "Calling connFd = accept(fd,NULL,NULL)." << ENDL;
         int connFd = accept(listenFd, NULL, NULL);
+        if (connFd == -1) {
+            ERROR << "accept() failed: " << std::strerror(errno) << ENDL;
+            continue;
+        }
 
         DEBUG << "We have recieved a connection on " << connFd << ". Calling processConnection(" << connFd << ")" << ENDL;
         quitProgram = processConnection(connFd);
