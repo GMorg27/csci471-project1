@@ -70,8 +70,8 @@ int processRequest(int sockFd, std::string &filename) {
 
     // Match line with HTTP GET request regex pattern and extract filename
     int lineEnd = request.find("\r\n");
-    std::string reqLine = request.substr(0, lineEnd + 2);
-    if (lineEnd) {
+    if (lineEnd != std::string::npos) {
+        std::string reqLine = request.substr(0, lineEnd + 2);
         std::smatch reqMatches;
         if (std::regex_match(reqLine, reqMatches, HTTP_GET_PATTERN)) {
             filename = reqMatches[1];
