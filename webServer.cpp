@@ -294,6 +294,7 @@ int main(int argc, char *argv[]) {
             }
             else {
                 FATAL << "Error binding socket: " << std::strerror(errno) << ENDL;
+                close(listenFd);
                 exit(-1);
             }
             port++;
@@ -312,6 +313,7 @@ int main(int argc, char *argv[]) {
     DEBUG << "Calling listen()" << ENDL;
     if (listen(listenFd, 5) == -1) {
         FATAL << "Error listening on socket: " << std::strerror(errno) << ENDL;
+        close(listenFd);
         exit(-1);
     }
 
